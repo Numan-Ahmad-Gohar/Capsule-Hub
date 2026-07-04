@@ -1,0 +1,88 @@
+@import 'tailwindcss';
+
+/*
+ * Design tokens for Capsule Hub. Tailwind v4 reads custom theme values from the
+ * @theme block and generates matching utilities (e.g. `text-brand-600`).
+ * Palette: indigo→violet brand, slate neutrals. One consistent system, no
+ * default-browser styling.
+ */
+@theme {
+  --color-brand-50: #eef2ff;
+  --color-brand-100: #e0e7ff;
+  --color-brand-200: #c7d2fe;
+  --color-brand-300: #a5b4fc;
+  --color-brand-400: #818cf8;
+  --color-brand-500: #6366f1;
+  --color-brand-600: #4f46e5;
+  --color-brand-700: #4338ca;
+  --color-accent-500: #8b5cf6;
+  --color-accent-600: #7c3aed;
+
+  --font-sans:
+    -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial,
+    sans-serif;
+}
+
+:root {
+  color-scheme: light;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+}
+
+/* The popup gets a fixed, comfortable size for a toolbar extension. */
+body {
+  width: 400px;
+  height: 580px;
+  overflow: hidden;
+  font-family: var(--font-sans);
+  background: #f8fafc;
+  color: #0f172a;
+}
+
+#root {
+  width: 100%;
+  height: 100%;
+}
+
+/* Custom slim scrollbar for the capsule list. */
+.ch-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: #cbd5e1 transparent;
+}
+.ch-scroll::-webkit-scrollbar {
+  width: 8px;
+}
+.ch-scroll::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 999px;
+}
+.ch-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+@keyframes ch-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.ch-fade-in {
+  animation: ch-fade-in 0.18s ease both;
+}
+
+@keyframes ch-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.ch-spin {
+  animation: ch-spin 0.7s linear infinite;
+}
