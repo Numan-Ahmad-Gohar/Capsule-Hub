@@ -1,0 +1,36 @@
+{
+  "name": "capsule-hub",
+  "version": "1.0.0",
+  "description": "Capture the context of an AI conversation as a structured, reusable Capsule and re-inject it into any other AI platform.",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "icons": "node scripts/generate-icons.mjs",
+    "prebuild": "node scripts/generate-icons.mjs"
+  },
+  "keywords": [
+    "chrome-extension",
+    "manifest-v3",
+    "ai",
+    "chatgpt",
+    "claude",
+    "gemini",
+    "context-transfer"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "fuse.js": "^7.0.0",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0"
+  },
+  "devDependencies": {
+    "@crxjs/vite-plugin": "^2.7.1",
+    "@tailwindcss/vite": "^4.3.2",
+    "@vitejs/plugin-react": "^4.7.0",
+    "tailwindcss": "^4.3.2",
+    "vite": "^6.3.5"
+  }
+}
