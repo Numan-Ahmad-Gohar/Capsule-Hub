@@ -45,7 +45,3 @@ Your use of those APIs is governed by their respective terms and privacy policie
 ## Data deletion
 
 You control all your data. Delete individual capsules from the popup, or remove everything by uninstalling the extension (this clears `chrome.storage.local`).
-
-## Contact
-
-For questions about this policy, open an issue on the project's GitHub repository.
