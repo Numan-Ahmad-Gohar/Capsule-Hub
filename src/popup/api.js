@@ -33,9 +33,9 @@ export async function getActiveContext() {
   }
 }
 
-/** Validate the currently-configured API key (Settings "Test key" button). */
+/** Check connection to the backend distillation service. */
 export async function testApiKey() {
   const res = await sendToBackground({ type: MSG.TEST_API_KEY })
-  if (!res || !res.ok) throw new Error(res?.error || 'Key test failed.')
-  return true
+  if (!res || !res.ok) throw new Error(res?.error || 'Backend connection failed.')
+  return res
 }

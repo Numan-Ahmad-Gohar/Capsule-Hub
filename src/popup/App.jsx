@@ -93,22 +93,8 @@ export default function App() {
     }
   }, [query, capsules])
 
-  const hasKey = useMemo(() => {
-    if (!settings) return false
-    const keyField =
-      { openai: 'openaiApiKey', anthropic: 'anthropicApiKey', openrouter: 'openrouterApiKey' }[
-        settings.provider
-      ] || 'openaiApiKey'
-    return Boolean(settings[keyField])
-  }, [settings])
-
   // --- actions ---------------------------------------------------------------
   const handleCapture = useCallback(async () => {
-    if (!hasKey) {
-      notify('err', 'API key needed', 'Add your API key in Settings to distill conversations.')
-      setView('settings')
-      return
-    }
     setCapturing(true)
     setCaptureStage(STAGE_LABEL[CAPTURE_STAGE.SCRAPING])
     try {
@@ -121,7 +107,7 @@ export default function App() {
       setCapturing(false)
       setCaptureStage('')
     }
-  }, [hasKey, notify, refresh])
+  }, [notify, refresh])
 
   const handleDelete = useCallback(
     async (id) => {
@@ -170,7 +156,6 @@ export default function App() {
             context={context}
             capturing={capturing}
             captureStage={captureStage}
-            hasKey={hasKey}
             onCapture={handleCapture}
           />
           <SearchBar
