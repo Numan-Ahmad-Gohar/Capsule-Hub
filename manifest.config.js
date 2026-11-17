@@ -4,10 +4,8 @@ import pkg from './package.json' with { type: 'json' }
 /**
  * Manifest V3 definition for Capsule Hub.
  *
- * Host permissions are intentionally scoped to the three supported AI platforms
- * plus the two LLM API endpoints used for distillation. The API hosts are
- * required so the background service worker can make cross-origin fetch calls
- * (MV3 service workers can only fetch hosts granted here).
+ * Scoped strictly to the supported AI platforms and distillation backend APIs
+ * to comply with Chrome Web Store Least Privilege policies.
  */
 export default defineManifest({
   manifest_version: 3,
@@ -33,15 +31,18 @@ export default defineManifest({
     service_worker: 'src/background/service-worker.js',
     type: 'module',
   },
-  permissions: ['activeTab', 'storage', 'scripting'],
+  // Only essential storage permissions needed
+  permissions: ['storage', 'unlimitedStorage'],
+
+  // Explicitly scoped hosts (No wildcards like https://*/*)
   host_permissions: [
     'https://chatgpt.com/*',
     'https://chat.openai.com/*',
     'https://claude.ai/*',
     'https://gemini.google.com/*',
-    'https://api.openai.com/*',
-    'https://api.anthropic.com/*',
-    'https://openrouter.ai/*',
+    'http://localhost:3000/*',
+    'http://127.0.0.1:3000/*',
+    'https://openrouter.ai/*', // Add OpenRouter API domain if background worker calls it directly
   ],
   content_scripts: [
     {
