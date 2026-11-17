@@ -1,6 +1,6 @@
 {
   "name": "capsule-hub",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Capture the context of an AI conversation as a structured, reusable Capsule and re-inject it into any other AI platform.",
   "type": "module",
   "private": true,
