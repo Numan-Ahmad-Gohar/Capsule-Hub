@@ -1,100 +1,26 @@
 /**
  * llm-client.js
  *
- * Provider-agnostic wrapper around the "context distillation" LLM call. The rest
- * of the app only ever calls `distill()` / `testApiKey()` and never knows which
- * vendor answered — swapping providers is a settings toggle.
+ * Client interface for the context distillation pipeline.
  *
- * Supported providers:
- *   - openai      → api.openai.com (native)
- *   - openrouter  → openrouter.ai (OpenAI-compatible; one key, 100+ models)
- *   - anthropic   → api.anthropic.com (native Messages API)
- *
- * OpenAI and OpenRouter share the same request shape, so they go through one
- * `callOpenAICompatible()` path parameterised by a small provider registry.
- *
- * Runs inside the background service worker, which is the only context with the
- * host permissions needed to reach these endpoints.
+ * Calls the secure backend distillation proxy (server/index.js or Cloudflare Worker),
+ * ensuring your AI model API keys are kept safe on your server and NEVER exposed in
+ * client-side code or browser extensions.
  */
 
 import { DISTILLED_FIELDS } from './capsule-schema.js'
 
-const SYSTEM_PROMPT = `You are a context-distillation engine for developers who move a project between different AI assistants.
+const DEFAULT_BACKEND_URL =
+  (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_BACKEND_URL) ||
+  'https://capsule-hub-proxy.capsulehub.workers.dev'
 
-Given a raw AI conversation transcript, extract ONLY the reusable context as STRICT JSON matching exactly this schema:
-
-{
-  "suggested_title": "short (3-8 word) title naming the project/task",
-  "suggested_tags": ["3-6 lowercase kebab-case topic tags"],
-  "goal": "1-2 sentence summary of what the user is ultimately trying to achieve",
-  "constraints": ["explicit requirements, preferences, tech choices, or restrictions the user stated"],
-  "key_decisions": ["concrete decisions made or conclusions reached during the conversation"],
-  "code_snippets": [{"language": "python", "code": "the snippet", "context": "one line on what it is for"}],
-  "open_questions": ["unresolved questions, blockers, or explicit next steps"]
-}
-
-Rules:
-- Output ONLY the JSON object. No prose, no markdown code fences, no commentary.
-- Be concise and factual. Do not invent information not present in the transcript.
-- Prefer the USER's stated intent over the assistant's suggestions when they differ.
-- Omit empty fields as empty arrays / empty strings — never use null.
-- Keep code_snippets to the few that carry real reuse value; drop trivial ones.
-- Escape all strings so the result is valid JSON.`
-
-/**
- * Provider registry. `openai` and `openrouter` are OpenAI-compatible; `anthropic`
- * has its own caller. `jsonMode` toggles the `response_format: json_object`
- * request field — OpenAI supports it universally, but many OpenRouter models
- * (especially free ones) don't, so we rely on the prompt + defensive parsing
- * there instead.
- */
-const PROVIDERS = {
-  openai: {
-    label: 'OpenAI',
-    kind: 'openai-compatible',
-    keyField: 'openaiApiKey',
-    modelField: 'openaiModel',
-    url: 'https://api.openai.com/v1/chat/completions',
-    jsonMode: true,
-    headers: (key) => ({ Authorization: `Bearer ${key}` }),
-  },
-  openrouter: {
-    label: 'OpenRouter',
-    kind: 'openai-compatible',
-    keyField: 'openrouterApiKey',
-    modelField: 'openrouterModel',
-    url: 'https://openrouter.ai/api/v1/chat/completions',
-    jsonMode: false,
-    headers: (key) => ({
-      Authorization: `Bearer ${key}`,
-      // OpenRouter uses these for attribution/rankings (optional but recommended).
-      'HTTP-Referer': 'https://github.com/your-username/capsule-hub',
-      'X-Title': 'Capsule Hub',
-    }),
-  },
-  anthropic: {
-    label: 'Anthropic',
-    kind: 'anthropic',
-    keyField: 'anthropicApiKey',
-    modelField: 'anthropicModel',
-    url: 'https://api.anthropic.com/v1/messages',
-  },
-}
-
-function resolveProvider(settings) {
-  const key = PROVIDERS[settings.provider] ? settings.provider : 'openai'
-  return { id: key, config: PROVIDERS[key] }
-}
-
-function readKey(settings, config) {
-  // Trim defensively — pasted keys frequently carry a trailing space/newline,
-  // which produces a malformed auth header and a confusing 401.
-  return String(settings[config.keyField] || '').trim()
+export function getBackendUrl(settings = {}) {
+  const url = settings.backendUrl || DEFAULT_BACKEND_URL
+  return String(url).trim().replace(/\/+$/, '')
 }
 
 /**
- * Turn scraped turns into a compact transcript, honouring a turn cap for cost
- * control. Keeps the MOST RECENT turns (the tail usually holds current state).
+ * Helper to build transcript for display or debugging.
  */
 export function buildTranscript(turns, maxTurns = 40) {
   const trimmed = turns.slice(-maxTurns)
@@ -107,8 +33,7 @@ export function buildTranscript(turns, maxTurns = 40) {
 }
 
 /**
- * Extract a JSON object from a model response that *should* be pure JSON but
- * sometimes arrives wrapped in ```json fences or with leading prose.
+ * Defensive JSON extraction helper.
  */
 export function parseModelJson(text) {
   if (!text || typeof text !== 'string') {
@@ -138,146 +63,88 @@ export function parseModelJson(text) {
   throw new Error('Could not parse a valid JSON capsule from the model response.')
 }
 
-// --- Provider callers --------------------------------------------------------
-
-async function callOpenAICompatible({ config, apiKey, model, transcript }) {
-  const body = {
-    model,
-    temperature: 0.2,
-    messages: [
-      { role: 'system', content: SYSTEM_PROMPT },
-      { role: 'user', content: `Distill the following transcript into the capsule JSON:\n\n${transcript}` },
-    ],
-  }
-  if (config.jsonMode) body.response_format = { type: 'json_object' }
-
-  const res = await fetch(config.url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...config.headers(apiKey) },
-    body: JSON.stringify(body),
-  })
-
-  if (!res.ok) throw await providerError(config.label, res)
-  const data = await res.json()
-  const content = data?.choices?.[0]?.message?.content
-  return parseModelJson(content)
-}
-
-async function callAnthropic({ config, apiKey, model, transcript }) {
-  const res = await fetch(config.url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': apiKey,
-      'anthropic-version': '2023-06-01',
-      // Required to call the Anthropic API from a browser/extension context.
-      'anthropic-dangerous-direct-browser-access': 'true',
-    },
-    body: JSON.stringify({
-      model,
-      max_tokens: 1500,
-      temperature: 0.2,
-      system: SYSTEM_PROMPT,
-      messages: [
-        {
-          role: 'user',
-          content: `Distill the following transcript into the capsule JSON. Respond with ONLY the JSON object:\n\n${transcript}`,
-        },
-      ],
-    }),
-  })
-
-  if (!res.ok) throw await providerError(config.label, res)
-  const data = await res.json()
-  return parseModelJson(data?.content?.[0]?.text)
-}
-
-/** Build a helpful Error from a failed provider response. */
-async function providerError(label, res) {
-  let detail = ''
-  try {
-    const body = await res.json()
-    detail = body?.error?.message || body?.message || ''
-  } catch {
-    /* non-JSON error body */
-  }
-  if (res.status === 401) {
-    return new Error(
-      `${label} rejected your API key (401). Make sure it's a ${label} key (re-paste with no extra spaces) and that it's active on ${label}'s dashboard.`,
-    )
-  }
-  if (res.status === 402) {
-    return new Error(`${label} says this request needs credits/billing (402). Add funds and retry.`)
-  }
-  if (res.status === 404) {
-    return new Error(`${label} couldn't find that model (404). Check the model name in Settings.`)
-  }
-  if (res.status === 429) {
-    return new Error(`${label} rate limit or quota reached (429). Try again shortly.`)
-  }
-  return new Error(`${label} API error (${res.status})${detail ? `: ${detail}` : ''}.`)
-}
-
-// --- Public API --------------------------------------------------------------
-
 /**
- * Distill a transcript into raw capsule fields (see DISTILLED_FIELDS).
+ * Distill a conversation transcript into raw capsule fields via the backend proxy.
+ *
  * @param {{role:string, content:string}[]} turns
  * @param {object} settings
  */
-export async function distill(turns, settings) {
+export async function distill(turns, settings = {}) {
   if (!Array.isArray(turns) || turns.length === 0) {
     throw new Error('No conversation was found to capture on this page.')
   }
 
-  const { config } = resolveProvider(settings)
-  const apiKey = readKey(settings, config)
-  if (!apiKey) throw new Error(`No ${config.label} API key set. Add one in Settings.`)
+  const backendUrl = getBackendUrl(settings)
+  const endpoint = `${backendUrl}/api/distill`
 
-  const model = settings[config.modelField]
-  const transcript = buildTranscript(turns, settings.maxTurns)
+  let response
+  try {
+    response = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        turns,
+        maxTurns: settings.maxTurns || 40,
+      }),
+      signal: AbortSignal.timeout(60000), // 60s timeout
+    })
+  } catch (err) {
+    if (err.name === 'TimeoutError') {
+      throw new Error('Distillation request timed out after 60s. Try a shorter conversation or check your backend server.')
+    }
+    throw new Error(
+      `Cannot connect to distillation service at ${backendUrl}. Make sure your backend server is running or configure the live URL in Settings.`,
+    )
+  }
 
-  const raw =
-    config.kind === 'anthropic'
-      ? await callAnthropic({ config, apiKey, model, transcript })
-      : await callOpenAICompatible({ config, apiKey, model, transcript })
+  let data
+  try {
+    data = await response.json()
+  } catch {
+    throw new Error(`Invalid response from distillation service (${response.status}).`)
+  }
 
-  // Keep only recognised distilled fields; the schema normaliser does the rest.
+  if (!response.ok || !data.ok) {
+    throw new Error(data?.error || `Distillation service error (${response.status}).`)
+  }
+
+  const raw = data.capsule || {}
   const picked = {}
-  for (const key of DISTILLED_FIELDS) if (key in raw) picked[key] = raw[key]
+  for (const key of DISTILLED_FIELDS) {
+    if (key in raw) picked[key] = raw[key]
+  }
+
   return picked
 }
 
 /**
- * Lightweight credential check for the Settings "Test key" button. Sends a
- * 1-token request so the user gets instant feedback without a full distill.
+ * Health-check the backend service connection.
  */
-export async function testApiKey(settings) {
-  const { config } = resolveProvider(settings)
-  const apiKey = readKey(settings, config)
-  if (!apiKey) throw new Error('Enter an API key first.')
-  const model = settings[config.modelField]
+export async function testApiKey(settings = {}) {
+  const backendUrl = getBackendUrl(settings)
+  const endpoint = `${backendUrl}/api/health`
 
-  if (config.kind === 'anthropic') {
-    const res = await fetch(config.url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01',
-        'anthropic-dangerous-direct-browser-access': 'true',
-      },
-      body: JSON.stringify({ model, max_tokens: 1, messages: [{ role: 'user', content: 'ping' }] }),
+  let response
+  try {
+    response = await fetch(endpoint, {
+      method: 'GET',
+      headers: { 'Content-Type': 'application/json' },
+      signal: AbortSignal.timeout(10000), // 10s timeout
     })
-    if (!res.ok) throw await providerError(config.label, res)
-    return true
+  } catch {
+    throw new Error(`Unable to reach distillation service at ${backendUrl}. Check that the backend is running.`)
   }
 
-  const res = await fetch(config.url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...config.headers(apiKey) },
-    body: JSON.stringify({ model, max_tokens: 1, messages: [{ role: 'user', content: 'ping' }] }),
-  })
-  if (!res.ok) throw await providerError(config.label, res)
-  return true
+  if (!response.ok) {
+    throw new Error(`Distillation service returned HTTP ${response.status}.`)
+  }
+
+  const data = await response.json()
+  if (data.status === 'missing_api_key') {
+    throw new Error('Backend is online, but AI_API_KEY is missing from the server environment.')
+  }
+
+  return data
 }

@@ -40,8 +40,7 @@ export default defineManifest({
     'https://chat.openai.com/*',
     'https://claude.ai/*',
     'https://gemini.google.com/*',
-    'http://localhost:3000/*',
-    'http://127.0.0.1:3000/*',
+    'https://capsule-hub-proxy.capsulehub.workers.dev/*',
     'https://openrouter.ai/*', // Add OpenRouter API domain if background worker calls it directly
   ],
   content_scripts: [
