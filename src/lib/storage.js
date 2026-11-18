@@ -23,13 +23,7 @@ const CAPSULES_KEY = 'capsules'
 const SETTINGS_KEY = 'settings'
 
 export const DEFAULT_SETTINGS = Object.freeze({
-  provider: 'openai', // 'openai' | 'anthropic' | 'openrouter'
-  openaiApiKey: '',
-  anthropicApiKey: '',
-  openrouterApiKey: '',
-  openaiModel: 'gpt-4o-mini',
-  anthropicModel: 'claude-haiku-4-5-20251001',
-  openrouterModel: 'openai/gpt-4o-mini', // any OpenRouter model slug; free tiers exist
+  backendUrl: 'https://capsule-hub-proxy.capsulehub.workers.dev',
   maxTurns: 40, // cap conversation turns sent to the LLM (cost control)
   cloudSync: false, // reserved for the Supabase adapter (roadmap)
   onboarded: false,
@@ -74,10 +68,9 @@ export async function getSettings() {
 
 export async function saveSettings(patch) {
   const next = { ...(await getSettings()), ...patch }
-  // Never persist stray whitespace on API keys — it silently breaks auth headers.
-  if (typeof next.openaiApiKey === 'string') next.openaiApiKey = next.openaiApiKey.trim()
-  if (typeof next.anthropicApiKey === 'string') next.anthropicApiKey = next.anthropicApiKey.trim()
-  if (typeof next.openrouterApiKey === 'string') next.openrouterApiKey = next.openrouterApiKey.trim()
+  if (typeof next.backendUrl === 'string') {
+    next.backendUrl = next.backendUrl.trim().replace(/\/+$/, '')
+  }
   await setRaw(SETTINGS_KEY, next)
   return next
 }
@@ -165,4 +158,33 @@ export function onCapsulesChanged(callback) {
 export async function exportCapsules() {
   const list = await getCapsules()
   return JSON.stringify({ version: 1, exported_at: new Date().toISOString(), capsules: list }, null, 2)
+}
+
+/** Import capsules from an exported JSON string (merges without duplicates). */
+export async function importCapsules(jsonString) {
+  let parsed
+  try {
+    parsed = JSON.parse(jsonString)
+  } catch {
+    throw new Error('Invalid JSON file. Please select a valid Capsule Hub backup.')
+  }
+
+  const incoming = Array.isArray(parsed) ? parsed : parsed?.capsules
+  if (!Array.isArray(incoming)) {
+    throw new Error('No valid capsules found in this backup file.')
+  }
+
+  const existing = (await getRaw(CAPSULES_KEY)) || []
+  const byId = new Map(existing.map((c) => [c.id, c]))
+
+  let added = 0
+  for (const item of incoming) {
+    const normalized = normalizeCapsule(item)
+    if (!byId.has(normalized.id)) added++
+    byId.set(normalized.id, normalized)
+  }
+
+  const merged = Array.from(byId.values()).sort(byNewestFirst)
+  await setRaw(CAPSULES_KEY, merged)
+  return { total: merged.length, added }
 }
